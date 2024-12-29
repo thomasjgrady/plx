@@ -1,0 +1,4 @@
+(executable
+ (public_name plx)
+ (name main)
+ (libraries plx))

@@ -1,56 +1,35 @@
+open Printf
+open Ast
+
 type value =
-  | Lit of Ast.lit
-  | Abs of (env -> value list -> value)
-[@@deriving show]
+  | Lit of lit
+  | Tuple of value list
+  | Struct of (string * value) list
+  | Enum of (string * value) list
+  | Abstract of (env -> value list -> value)
 
 and env = (string * value) list
-[@@deriving show]
 
 let lookup env id = match List.assoc_opt id env with
-  | None -> failwith (Printf.sprintf "Unknown identifier: %s" id)
+  | None -> failwith (sprintf "Unknown identifier: %s" id)
   | Some x -> x
 
-let algebra : (env, value) Ast.algebra = {
-  expr = {
-    lit = (fun env x -> (env, Lit x)) ;
-    ident = (fun env id -> (env, lookup env id)) ;
-    app = (fun env id args -> (match lookup env id with
-      | Abs f -> (env, f env args)
-      | _ -> failwith (Printf.sprintf "%s is not a function" id))) ;
-    binop = (fun env op x y ->
-      let (x', y') = match (x, y) with
-        | (Lit Ast.Nat x', Lit Ast.Nat y') -> (x', y')
-        | _ -> failwith (Printf.sprintf "type error")
-      in
-      let z = match op with
-        | Add -> x' + y'
-        | Mul -> x' * y'
-      in
-      (env, Lit (Ast.Nat z))) ;
-  } ;
-  stmt = {
-    assign = (fun env id x -> (match List.assoc_opt id env with
-      | None -> ((id, x) :: env, Lit Ast.Unit)
-      | Some _ -> failwith (Printf.sprintf "use of duplicate identifier: %s" id))) ;
-    abs = (fun env id args thunk -> (match List.assoc_opt id env with
-      | None ->
-        let f (env' : env) args' =
-          if List.length args <> List.length args'
-          then failwith "invalid number of arguments"
-          (* todo: recursion *)
-          else
-            let captured = List.filter
-              (fun (id', _) -> match List.find_opt (fun x -> x = id') args with
-                | None -> true
-                | _ -> false)
-              env'
-            in
-            thunk (List.concat [List.combine args args'; captured])
-        in
-        ((id, Abs f) :: env, Lit Ast.Unit)
-      | Some _ -> failwith (Printf.sprintf "use of duplicate identifier: %s" id))) ;
-  } ;
-  prog = (fun env _rs -> (env, Lit Ast.Unit)) ;
-}
+let rec eval_expr (ev : env) (e : 'a expr) = match e with
+  | ExprLit (_, x) -> Lit x
+  | ExprRvalue (_, rv) -> eval_rvalue ev rv
+  | ExprParen (_, e') -> eval_expr ev e'
+  | ExprTuple (_, es) -> Tuple (List.map (eval_expr ev) es)
+  | ExprStruct (_, items) -> Struct (List.map (fun (k, v) -> (k, eval_expr ev v)) items)
+  | ExprEnum (_, items) -> Enum (List.map (fun (k, v) -> (k, eval_expr ev v)) items)
+  | ExprApply (_, rv, args) -> match (eval_rvalue ev rv) with
+    | Abstract f ->
+      let args' = List.map (eval_expr ev) args in
+      f ev args'
+    | _ -> failwith (sprintf "%s is not a function" (show_rvalue rv))
 
-let eval env program = Ast.fold algebra env program
+and eval_rvalue ev rv = match rv with
+  | RvalueIdent id -> lookup ev id
+  | RvalueProperty (id, keys) ->
+    match lookup ev id with
+      | Struct props -> eval_rvalue props (RvalueProperty (List.hd keys, List.tl keys))
+      | _ -> failwith (sprintf "%s is not a struct" id)

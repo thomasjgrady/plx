@@ -1,44 +1,60 @@
-type 'a t = 'a stmt list
-[@@deriving show]
-
-and 'a stmt =
-  | StmtExpr of 'a * 'a expr
-  | StmtAssign of 'a * 'a lvalue * 'a expr
-  | StmtAbstract of 'a * 'a lvalue list * 'a expr
-[@@deriving show]
-
-and 'a expr =
-  | ExprLit of 'a * lit
-  | ExprRvalue of 'a * rvalue
-  | ExprParen of 'a * 'a expr
-  | ExprTuple of 'a * 'a expr list
-  | ExprStruct of 'a * (string * 'a expr) list
-  | ExprEnum of 'a * (string * 'a expr) list
-  | ExprApply of 'a * rvalue * 'a expr list
-[@@deriving show]
-
-and lit =
-  | LitUnit
-  | LitInt of int
-  | LitBool of bool
-  | LitString of string
-  | LitType of type_
-[@@deriving show]
-
-and type_ =
+type type_ =
   | TypeUnit
-  | TypeInt
+  | TypeNat
   | TypeBool
-  | TypeString
-  | TypeType (* todo: universes *)
-[@@deriving show]
+[@@deriving show, eq]
+
+type 'a stmt =
+  | Let of 'a lvalue * 'a expr
 
 and 'a lvalue =
-  | LvalueTyped of 'a * string * 'a expr
+  | LvalueTyped of 'a * string * type_
   | LvalueUntyped of 'a * string
+
+
+and 'a expr =
+  | Lit of 'a * lit
+  | Rvalue of 'a rvalue
+  | Binop of 'a * binop * 'a expr * 'a expr
+  | Func of 'a * 'a lvalue * 'a expr
+  | App of 'a * 'a expr * 'a expr
+
+and lit =
+  | Unit
+  | Nat of int
+  | Bool of bool
+
+and 'a rvalue =
+  | RvalueIdent of 'a * string
+
+and binop =
+  | Add
+  | Mul
+  | Eq
+  | Gt
+  | Lt
 [@@deriving show]
 
-and rvalue =
-  | RvalueIdent of string
-  | RvalueProperty of string * string list
+let lvalue_id = function
+  | LvalueTyped (_, id, _) -> id
+  | LvalueUntyped (_, id) -> id
+
+let rvalue_id = function
+  | RvalueIdent (_, id) -> id
+
+let lvalue_annotation = function
+  | LvalueTyped (a, _, _) -> a
+  | LvalueUntyped (a, _) -> a
+
+let rvalue_annotation = function
+  | RvalueIdent (a, _) -> a
+
+let expr_annotation = function
+  | Lit (a, _) -> a
+  | Rvalue (RvalueIdent (a, _)) -> a
+  | Binop (a, _, _, _) -> a
+  | Func (a, _, _) -> a
+  | App (a, _, _) -> a
+
+type empty = unit
 [@@deriving show]

@@ -40,8 +40,7 @@ let rec annotate_expr (ctx : context) (e : 'a Ast.expr) : t Ast.expr = match e w
   | Ast.App (_, e1, e2) ->
     let e1' = annotate_expr ctx e1 in
     let e2' = annotate_expr ctx e2 in
-    let t_ret = Ast.expr_annotation e2' in
-    Ast.App (t_ret, e1', e2')
+    Ast.App (new_type_var (), e1', e2')
 
 and annotate_lvalue = function
   | Ast.LvalueTyped (_, id, ty) -> Ast.LvalueTyped (Type ty, id, ty)
@@ -88,7 +87,7 @@ let rec constraints (x : t Ast.expr) : (t * t) list = match x with
     (match ty with
     | Func (t_arg, t_ret) -> cons @ [(ty, t_ret); (Ast.expr_annotation e1, t_arg)]
     | Var _ -> cons @ [(Ast.expr_annotation e1, Func (Ast.expr_annotation e2, ty))]
-    | _ -> failwith "invalid")
+    | _ -> failwith (sprintf "Invalid application: %s" (show ty)))
 
 let rec substitute subs x =
   List.fold_right (fun (a, b) x' -> substitute_one a b x') subs x
@@ -131,10 +130,7 @@ let rec apply_subs subs x =
       apply_subs subs rhs
     )
     | Ast.Func (ty, lv, e) ->
-      let lv' = match lv with
-        | Ast.LvalueTyped (ty', id, ty'') -> Ast.LvalueTyped (s ty', id, ty'')
-        | Ast.LvalueUntyped (ty', id) -> Ast.LvalueUntyped (s ty', id)
-      in
+      let lv' = apply_lvalue_subs subs lv in
       Ast.Func (s ty, lv', apply_subs subs e)
     | Ast.App (ty, e1, e2) -> Ast.App (
       s ty ,
@@ -142,8 +138,36 @@ let rec apply_subs subs x =
       apply_subs subs e2
     )
 
+and apply_lvalue_subs subs lv = match lv with
+  | Ast.LvalueTyped (ty', id, ty'') -> Ast.LvalueTyped (substitute subs ty', id, ty'')
+  | Ast.LvalueUntyped (ty', id) -> Ast.LvalueUntyped (substitute subs ty', id)
+
 let infer_expr ctx x =
   let a = annotate_expr ctx x in
   let cons = constraints a in
   let subs = unify cons in
   apply_subs subs a
+
+let infer_stmt ctx s = match s with
+  | Ast.Let (lv, e) ->
+    let e' = infer_expr ctx e in
+    let t_e = Ast.expr_annotation e' in
+    let lv' = match lv with
+      | Ast.LvalueTyped (_, id, ty) ->
+        let ty' = Type ty in
+        let subs = unify [(t_e, ty')] in
+        Ast.LvalueTyped (substitute subs ty', id, ty)
+      | Ast.LvalueUntyped (_, id) -> Ast.LvalueUntyped (t_e, id)
+    in
+    let lv_id = Ast.lvalue_id lv' in
+    let ctx' = match List.assoc_opt lv_id ctx with
+      | Some _ -> failwith (sprintf "Duplicate identifier: %s" lv_id)
+      | None -> (lv_id, Ast.lvalue_annotation lv') :: ctx
+    in
+    (ctx', Ast.Let (lv', e'))
+
+let infer ctx x =
+  List.fold_left_map
+  (fun ctx' s -> infer_stmt ctx' s)
+  ctx
+  x

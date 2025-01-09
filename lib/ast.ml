@@ -4,7 +4,7 @@ type type_ =
   | TypeBool
 [@@deriving show, eq]
 
-type 'a stmt =
+and 'a stmt =
   | Let of 'a lvalue * 'a expr
 
 and 'a lvalue =

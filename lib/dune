@@ -2,9 +2,9 @@
  (preprocess (pps ppx_deriving.show ppx_deriving.eq))
  (name plx))
 
-; (ocamllex
-;  (modules lexer))
+(ocamllex
+ (modules lexer))
 
-; (menhir
-;  (modules parser)
-;  (flags --strict))
+(menhir
+ (modules parser)
+ (flags --strict))

@@ -11,7 +11,6 @@ and 'a lvalue =
   | LvalueTyped of 'a * string * type_
   | LvalueUntyped of 'a * string
 
-
 and 'a expr =
   | Lit of 'a * lit
   | Rvalue of 'a rvalue

@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "plx",
+    "plxc"
+]
+resolver = "2"

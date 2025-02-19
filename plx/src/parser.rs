@@ -31,11 +31,24 @@ pub fn parser<'tokens>() -> impl Parser<
         syntax(Syntax::Paren(Side::Right))
     );
 
+    let ite = keyword(Keyword::If)
+        .ignore_then(expr.clone())
+        .then_ignore(keyword(Keyword::Then))
+        .then(expr.clone())
+        .then_ignore(keyword(Keyword::Else))
+        .then(expr.clone())
+        .map(|((if_, then), else_)| Expression::IfThenElse {
+            if_: Box::new(if_),
+            then: Box::new(then),
+            else_: Box::new(else_)
+        });
+
     let atom = choice((
+        paren,
+        ite,
         literal.map(Expression::Literal),
         r#type.map(Expression::Type),
-        ident.map(Expression::Ident),
-        paren
+        ident.map(Expression::Ident)
     ));
 
     let ops = atom.pratt(vec![

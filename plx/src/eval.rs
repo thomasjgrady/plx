@@ -55,6 +55,23 @@ impl Eval<Expression, RuntimeError> for Expression {
                     })))
                 }
             },
+            Self::IfThenElse { if_, then, else_ } => {
+                let cond_expr = if_.eval(ctx)?;
+                let cond = match cond_expr {
+                    Self::Literal(Literal::Bool(b)) => b,
+                    _ => {
+                        return Err(Error::Runtime(RuntimeError::Type(TypeError::NotABoolean {
+                            expr: cond_expr,
+                            detail: Some("If condition must evaluate to boolean".to_string())
+                        })));
+                    }
+                };
+                if cond {
+                    then.eval(ctx)
+                } else {
+                    else_.eval(ctx)
+                }
+            }
             Self::Abs { lvalue: _, body: _ } => Ok(self.clone()),
             Self::App { func, arg } => {
 

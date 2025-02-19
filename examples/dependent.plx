@@ -1,0 +1,1 @@
+let dependent_type = (x: int) -> if x == 42 then bool else int;

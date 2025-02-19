@@ -4,7 +4,10 @@ use crate::ast::{Binop, Literal, Type};
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Keyword {
-    Let
+    Let,
+    If,
+    Then,
+    Else
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -60,6 +63,9 @@ pub fn lexer<'src>() -> impl Parser<
         just("==").to(Token::Binop(Binop::Eq)),
 
         just("let").to(Token::Keyword(Keyword::Let)),
+        just("if").to(Token::Keyword(Keyword::If)),
+        just("then").to(Token::Keyword(Keyword::Then)),
+        just("else").to(Token::Keyword(Keyword::Else)),
 
         just(":").to(Token::Syntax(Syntax::Colon)),
         just(";").to(Token::Syntax(Syntax::Semicolon)),

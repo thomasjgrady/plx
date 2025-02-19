@@ -66,7 +66,7 @@ fn main() {
     let program = parse_res.unwrap();
     let mut type_ctx = Context::new();
     let mut eval_ctx = Context::new();
-    
+
     for s in &program {
         // TODO: source maps for expressions
         let type_res = s.infer(&mut type_ctx);

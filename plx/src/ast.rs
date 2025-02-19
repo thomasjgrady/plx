@@ -41,6 +41,11 @@ pub enum Expression {
         lhs: Box<Self>,
         rhs: Box<Self>
     },
+    IfThenElse {
+        if_: Box<Self>,
+        then: Box<Self>,
+        else_: Box<Self>
+    },
     Abs {
         lvalue: Lvalue,
         body: Box<Self>

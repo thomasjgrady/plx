@@ -1,0 +1,1 @@
+let is_good = (x: int) -> if x == 42 then true else false;

@@ -15,6 +15,10 @@ pub enum TypeError {
         expr: Expression,
         detail: Option<String>
     },
+    NotABoolean {
+        expr: Expression,
+        detail: Option<String>
+    },
     BinaryOperator {
         op: Binop,
         lhs: Expression,
@@ -104,7 +108,7 @@ impl TypeInfer<Expression, TypeError> for Expression {
                 Literal::Bool(_) => Ok(Self::Type(Type::Bool)),
                 Literal::Int(_) => Ok(Self::Type(Type::Int))
             },
-            Self::Type(_) => Ok(self.clone()),
+            Self::Type(_) => Ok(Self::Type(Type::Type)),
             Self::Ident(x) => ctx.lookup(x)
                 .cloned()
                 .map_err(|e| Error::Context(e)),
@@ -117,13 +121,19 @@ impl TypeInfer<Expression, TypeError> for Expression {
                     },
                     (Binop::Eq, Self::Type(_)) => {
                         rhs.check(ctx, &t_lhs)?;
-                        Ok(t_lhs)
+                        Ok(Self::Type(Type::Bool))
                     },
                     _ => {
                         let t_rhs = rhs.infer(ctx)?;
                         Err(Error::Type(TypeError::BinaryOperator { op: *op, lhs: t_lhs, rhs: t_rhs, detail: None }))
                     }
                 }
+            },
+            Self::IfThenElse { if_, then, else_ } => {
+                if_.check(ctx, &Expression::Type(Type::Bool))?;
+                let t_then = then.infer(ctx)?;
+                else_.check(ctx, &t_then)?;
+                Ok(t_then)
             },
             Self::Abs { lvalue, body } => {
                 let an = match &lvalue.annotation {

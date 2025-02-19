@@ -1,0 +1,7 @@
+[package]
+name = "plx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chumsky = { version = "1.0.0-alpha.8", features = ["pratt"] }

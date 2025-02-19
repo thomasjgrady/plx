@@ -1,5 +1,5 @@
 use crate::{ast::{Binop, Expression, Literal, Statement}, context::{Context, Error as ContextError}};
-use crate::typing::Error as TypeError;
+use crate::typing::TypeError as TypeError;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error<E> {
@@ -18,14 +18,7 @@ pub enum RuntimeError {
 
 fn into_abs(e: Expression) -> Result<(String, Box<Expression>), RuntimeError> {
     match e {
-        Expression::Abs { ident, body } => match *ident {
-            Expression::Ident(x) => Ok((x, body)),
-            _ => Err(RuntimeError::Type(TypeError::Mistmatched {
-                expected: Expression::Ident("argument_name".to_string()),
-                actual: *ident,
-                detail: Some("Invalid argument identifier".to_string())
-            }))
-        },
+        Expression::Abs { lvalue, body } => Ok((lvalue.ident, body)),
         _ => Err(RuntimeError::Type(TypeError::NotAFunction { expr: e, detail: None }))
     }
 }
@@ -51,7 +44,9 @@ impl Eval<Expression, RuntimeError> for Expression {
                         Binop::Eq,
                         Expression::Literal(_),
                         Expression::Literal(_)
-                    ) => Ok(Expression::Literal(Literal::Bool(x == y))),
+                    ) => {
+                        Ok(Expression::Literal(Literal::Bool(x == y)))
+                    },
                     _ => Err(Error::Runtime(RuntimeError::Type(TypeError::BinaryOperator {
                         op: *op,
                         lhs: *lhs.clone(),
@@ -60,7 +55,7 @@ impl Eval<Expression, RuntimeError> for Expression {
                     })))
                 }
             },
-            Self::Abs { ident: _, body: _ } => Ok(self.clone()),
+            Self::Abs { lvalue: _, body: _ } => Ok(self.clone()),
             Self::App { func, arg } => {
 
                 if let Expression::Ident(s) = *func.clone() {

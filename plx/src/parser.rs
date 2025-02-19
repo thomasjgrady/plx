@@ -2,6 +2,7 @@ use chumsky::prelude::*;
 use chumsky::pratt::*;
 
 use crate::ast::Binop;
+use crate::ast::Lvalue;
 use crate::ast::Statement;
 use crate::lexer::Keyword;
 use crate::lexer::Side;
@@ -37,28 +38,47 @@ pub fn parser<'tokens>() -> impl Parser<
         paren
     ));
 
-    expr.define(atom.pratt(vec![
+    let ops = atom.pratt(vec![
         infix(
-            left(7),
-            just(Token::Binop(Binop::Eq)),
-            |x, _, y, _e| Expression::Binop { op: Binop::Eq, lhs: Box::new(x), rhs: Box::new(y) }
+            left(3),
+            empty(),
+            |x, _, y, _e| Expression::App { func: Box::new(x), arg: Box::new(y) }
         ).boxed(),
         infix(
-            left(4),
+            left(2),
             just(Token::Binop(Binop::Add)),
             |x, _, y, _e| Expression::Binop { op: Binop::Add, lhs: Box::new(x), rhs: Box::new(y) }
         ).boxed(),
         infix(
             left(1),
-            empty(),
-            |x, _, y, _e| Expression::App { func: Box::new(x), arg: Box::new(y) }
+            just(Token::Binop(Binop::Eq)),
+            |x, _, y, _e| Expression::Binop { op: Binop::Eq, lhs: Box::new(x), rhs: Box::new(y) }
         ).boxed(),
-        infix(
-            right(0),
-            just(Token::Syntax(Syntax::Arrow)),
-            |x, _, y, _e| Expression::Abs { ident: Box::new(x), body: Box::new(y) }
-        ).boxed()
-    ]));
+    ]);
+
+    let arg = choice((
+        ident.clone()
+            .then_ignore(syntax(Syntax::Colon))
+            .then(expr.clone())
+            .delimited_by(
+                syntax(Syntax::Paren(Side::Left)),
+                syntax(Syntax::Paren(Side::Right))
+            )
+            .map(|(x, e)| (x, Some(e))),
+        ident.clone()
+            .map(|x| (x, None))
+    ));
+
+    let abs = arg
+        .then_ignore(syntax(Syntax::Arrow))
+        .then(expr.clone())
+        .map(|(lv, body)| Expression::Abs {
+            lvalue: Lvalue { ident: lv.0, annotation: lv.1.map(|x| Box::new(x)) }, body: Box::new(body) });
+
+    expr.define(choice((
+        abs,
+        ops
+    )));
 
     let assign = keyword(Keyword::Let)
         .ignore_then(ident.clone())

@@ -8,6 +8,7 @@ use plx::eval::Eval;
 use plx::lexer::lexer;
 use plx::parser::parser;
 use chumsky::prelude::*;
+use plx::typing::TypeInfer;
 
 
 #[derive(clap::Parser, Debug)]
@@ -63,14 +64,23 @@ fn main() {
     }
 
     let program = parse_res.unwrap();
-    let mut ctx = Context::new();
+    let mut type_ctx = Context::new();
+    let mut eval_ctx = Context::new();
     
     for s in &program {
         // TODO: source maps for expressions
-        let eval_res = s.eval(&mut ctx);
+        let type_res = s.infer(&mut type_ctx);
+        if let Err(e) = type_res {
+            eprintln!("Type Error: {:#?}", e);
+            exit(1);
+        }
+
+        let eval_res = s.eval(&mut eval_ctx);
         if let Err(e) = eval_res {
-            eprintln!("{:?}", e);
+            eprintln!("Evaluation Error: {:#?}", e);
             exit(1);
         }
     }
+
+
 }

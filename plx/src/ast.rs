@@ -20,6 +20,18 @@ pub enum Binop {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
+pub struct Lvalue {
+    pub ident: String,
+    pub annotation: Option<Box<Expression>>
+}
+
+impl Lvalue {
+    pub fn new(ident: String, annotation: Option<Expression>) -> Self {
+        Self { ident, annotation: annotation.map(|x| Box::new(x)) }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Expression {
     Literal(Literal),
     Type(Type),
@@ -30,7 +42,7 @@ pub enum Expression {
         rhs: Box<Self>
     },
     Abs {
-        ident: Box<Self>,
+        lvalue: Lvalue,
         body: Box<Self>
     },
     App {

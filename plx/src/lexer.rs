@@ -39,6 +39,11 @@ pub fn lexer<'src>() -> impl Parser<
     Vec<Token>,
     extra::Err<Rich<'src, char>>
 > {
+
+    let comment = just("//")
+        .then(any().and_is(just('\n').not()).repeated())
+        .padded();
+
     choice((
 
         just("()").to(Token::Literal(Literal::Unit)),
@@ -68,6 +73,7 @@ pub fn lexer<'src>() -> impl Parser<
         text::ident().map(|x: &str| Token::Ident(x.to_string()))
 
     ))
+        .padded_by(comment.repeated())
         .padded()
         .repeated()
         .collect()

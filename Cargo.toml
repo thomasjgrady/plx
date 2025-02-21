@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "plx",
-    "plxc"
+    "plxc",
+    "plxi"
 ]
 resolver = "2"

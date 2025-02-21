@@ -1,8 +1,10 @@
+use std::fmt::Display;
+
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Literal {
     Unit,
     Bool(bool),
-    Int(i32),
+    Int(i32)
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -13,9 +15,10 @@ pub enum Type {
     Type
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Binop {
     Add,
+    Mul,
     Eq
 }
 
@@ -26,8 +29,8 @@ pub struct Lvalue {
 }
 
 impl Lvalue {
-    pub fn new(ident: String, annotation: Option<Expression>) -> Self {
-        Self { ident, annotation: annotation.map(|x| Box::new(x)) }
+    pub fn new<S: Into<String>>(ident: S, annotation: Option<Expression>) -> Self {
+        Self { ident: ident.into(), annotation: annotation.map(|x| Box::new(x)) }
     }
 }
 
@@ -41,13 +44,8 @@ pub enum Expression {
         lhs: Box<Self>,
         rhs: Box<Self>
     },
-    IfThenElse {
-        if_: Box<Self>,
-        then: Box<Self>,
-        else_: Box<Self>
-    },
     Abs {
-        lvalue: Lvalue,
+        arg: Lvalue,
         body: Box<Self>
     },
     App {
@@ -59,9 +57,117 @@ pub enum Expression {
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Statement {
     Assign {
-        ident: String,
-        annotation: Option<Expression>,
-        expr: Expression
+        lv: Lvalue,
+        expr: Box<Expression>
     },
-    Expression(Expression)
+    Expr(Expression)
+}
+
+impl Expression {
+    pub fn subs(&self, replace: &Self, with: &Self) -> Self {
+        if self == replace {
+            return with.clone();
+        }
+        match self {
+            Self::Literal(_) | Self::Ident(_) | Self::Type(_) => self.clone(),
+            Self::Binop { op, lhs, rhs } => Self::Binop {
+                op: op.clone(),
+                lhs: Box::new(lhs.subs(replace, with)),
+                rhs: Box::new(rhs.subs(replace, with))
+            },
+            Self::Abs { arg, body } => {
+                // here we need to avoid clobbering the substituted value by
+                // not performing the replacement in the body if the argument has the
+                // same identifier as the replace value
+                //
+                // however, because the language is dependently typed, we must
+                // still apply the replacement to the annotation of the lvalue if it exists
+                //
+                // depending on the semantics of how we will allow recursion or self reference
+                // in dependent arguments in the future, this may have to change
+                let arg_out = Lvalue::new(
+                    arg.ident.clone(), 
+                    arg.annotation.clone().map(|x| x.subs(replace, with))
+                );
+                match (replace, &arg.ident) {
+                    (Self::Ident(x), y) if x == y => Self::Abs {
+                        arg: arg_out,
+                        body: body.clone()
+                    },
+                    _ => Self::Abs {
+                        arg: arg_out,
+                        body: Box::new(body.subs(replace, with))
+                    }
+                }
+            },
+            Self::App { func, arg } => Self::App {
+                func: Box::new(func.subs(replace, with)),
+                arg: Box::new(arg.subs(replace, with))
+            }
+        }
+    }
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unit => write!(f, "()"),
+            Self::Bool(x) => x.fmt(f),
+            Self::Int(x) => x.fmt(f)
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unit => write!(f, "unit"),
+            Self::Bool => write!(f, "bool"),
+            Self::Int => write!(f, "int"),
+            Self::Type => write!(f, "type"),
+        }
+    }
+}
+
+impl Display for Binop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "+"),
+            Self::Mul => write!(f, "*"),
+            Self::Eq => write!(f, "=="),
+        }
+    }
+}
+
+impl Display for Lvalue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.annotation {
+            Some(x) => write!(f, "{}: {}", self.ident, x),
+            None => write!(f, "{}", self.ident)
+        }
+    }
+}
+
+impl Display for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Literal(x) => write!(f, "{}", x),
+            Self::Type(x) => write!(f, "{}", x),
+            Self::Ident(x) => write!(f, "{}", x),
+            Self::Binop { op, lhs, rhs } => write!(
+                f,
+                "({} {} {})",
+                lhs,
+                op,
+                rhs
+            ),
+            Self::Abs { arg, body } => {
+                match &arg.annotation {
+                    Some(_) => write!(f, "({}) -> {}", arg, body),
+                    None => write!(f, "{} -> {}", arg, body),
+                }
+            },
+            Self::App { func, arg } => write!(f, "{} ({})", func, arg)
+        }
+    }
 }

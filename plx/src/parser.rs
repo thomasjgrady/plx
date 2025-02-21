@@ -1,19 +1,14 @@
+use crate::ast::{Binop, Expression, Lvalue};
+use crate::lexer::{Keyword, Side, Syntax};
+use crate::{ast::Statement, lexer::Token};
 use chumsky::prelude::*;
 use chumsky::pratt::*;
 
-use crate::ast::Binop;
-use crate::ast::Lvalue;
-use crate::ast::Statement;
-use crate::lexer::Keyword;
-use crate::lexer::Side;
-use crate::lexer::Syntax;
-use crate::{ast::Expression, lexer::Token};
-
-pub fn parser<'tokens>() -> impl Parser<
-    'tokens,
-    &'tokens [Token],
+pub fn parser<'a>() -> impl Parser<
+    'a,
+    &'a [Token],
     Vec<Statement>,
-    extra::Err<Rich<'tokens, Token>>
+    extra::Err<Rich<'a, Token>>
 > {
 
     let literal = select! { Token::Literal(x) => x };
@@ -26,91 +21,72 @@ pub fn parser<'tokens>() -> impl Parser<
     let mut expr = Recursive::declare();
     let mut stmt = Recursive::declare();
 
-    let paren = expr.clone().delimited_by(
-        syntax(Syntax::Paren(Side::Left)),
-        syntax(Syntax::Paren(Side::Right))
-    );
-
-    let ite = keyword(Keyword::If)
-        .ignore_then(expr.clone())
-        .then_ignore(keyword(Keyword::Then))
-        .then(expr.clone())
-        .then_ignore(keyword(Keyword::Else))
-        .then(expr.clone())
-        .map(|((if_, then), else_)| Expression::IfThenElse {
-            if_: Box::new(if_),
-            then: Box::new(then),
-            else_: Box::new(else_)
-        });
-
     let atom = choice((
-        paren,
-        ite,
-        literal.map(Expression::Literal),
-        r#type.map(Expression::Type),
-        ident.map(Expression::Ident)
+        literal.clone().map(|x| Expression::Literal(x)),
+        r#type.clone().map(|x| Expression::Type(x)),
+        ident.clone().map(|x| Expression::Ident(x)),
+        expr.clone().delimited_by(
+        syntax(Syntax::Paren(Side::Left)),
+            syntax(Syntax::Paren(Side::Right))
+        )
     ));
 
-    let ops = atom.pratt(vec![
-        infix(
-            left(3),
-            empty(),
-            |x, _, y, _e| Expression::App { func: Box::new(x), arg: Box::new(y) }
-        ).boxed(),
-        infix(
-            left(2),
-            just(Token::Binop(Binop::Add)),
-            |x, _, y, _e| Expression::Binop { op: Binop::Add, lhs: Box::new(x), rhs: Box::new(y) }
-        ).boxed(),
-        infix(
-            left(1),
-            just(Token::Binop(Binop::Eq)),
-            |x, _, y, _e| Expression::Binop { op: Binop::Eq, lhs: Box::new(x), rhs: Box::new(y) }
-        ).boxed(),
-    ]);
-
     let arg = choice((
+        ident.clone().map(|x| Lvalue::new(x, None)),
         ident.clone()
-            .then_ignore(syntax(Syntax::Colon))
-            .then(expr.clone())
+            .then(syntax(Syntax::Colon).ignore_then(expr.clone()))
             .delimited_by(
                 syntax(Syntax::Paren(Side::Left)),
                 syntax(Syntax::Paren(Side::Right))
             )
-            .map(|(x, e)| (x, Some(e))),
-        ident.clone()
-            .map(|x| (x, None))
+            .map(|(ident, annotation): (String, Expression)| Lvalue::new(ident, Some(annotation.clone())))
     ));
 
-    let abs = arg
+    let lvalue = ident.clone()
+        .then((syntax(Syntax::Colon).ignore_then(expr.clone())).or_not())
+        .map(|(ident, annotation)| Lvalue::new(ident, annotation));
+
+    let func = arg.clone()
         .then_ignore(syntax(Syntax::Arrow))
         .then(expr.clone())
-        .map(|(lv, body)| Expression::Abs {
-            lvalue: Lvalue { ident: lv.0, annotation: lv.1.map(|x| Box::new(x)) }, body: Box::new(body) });
+        .map(|(lv, body)| Expression::Abs { arg: lv, body: Box::new(body) });
+
+    let ops = atom.pratt(vec![
+        infix(left(3), empty(), |x, _, y, _| {
+            Expression::App { func: Box::new(x), arg: Box::new(y) }
+        }).boxed(),
+        infix(left(2), just(Token::Binop(Binop::Mul)), |x, _, y, _| {
+            Expression::Binop { op: Binop::Mul, lhs: Box::new(x), rhs: Box::new(y) }
+        }).boxed(),
+        infix(left(1), just(Token::Binop(Binop::Add)), |x, _, y, _| {
+            Expression::Binop { op: Binop::Add, lhs: Box::new(x), rhs: Box::new(y) }
+        }).boxed(),
+        infix(left(0), just(Token::Binop(Binop::Eq)), |x, _, y, _| {
+            Expression::Binop { op: Binop::Eq, lhs: Box::new(x), rhs: Box::new(y) }
+        }).boxed()
+    ]);
 
     expr.define(choice((
-        abs,
+        func,
         ops
     )));
 
     let assign = keyword(Keyword::Let)
-        .ignore_then(ident.clone())
-        .then((syntax(Syntax::Colon).ignore_then(expr.clone())).or_not())
+        .ignore_then(lvalue.clone())
         .then_ignore(syntax(Syntax::Equals))
         .then(expr.clone())
-        .map(|((ident, annotation), expr)| Statement::Assign {
-            ident,
-            annotation,
-            expr
-        });
-
-    stmt.define(
-choice((
-            assign,
-            expr.clone().map(|e| Statement::Expression(e))
-        ))
         .then_ignore(syntax(Syntax::Semicolon))
-    );
+        .map(|(lv, e)| Statement::Assign { lv, expr: Box::new(e) });
+        
+
+    let expr_ = expr.clone()
+        .then_ignore(syntax(Syntax::Semicolon))
+        .map(|e| Statement::Expr(e));
+
+    stmt.define(choice((
+        assign,
+        expr_
+    )));
 
     stmt.repeated().collect()
 

@@ -1,0 +1,11 @@
+[package]
+name = "plxi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plx = { path = "../plx"}
+chumsky = { version = "1.0.0-alpha.8", features = ["pratt"] }
+ariadne = "0.5.0"
+colored = "3.0.0"
+clearscreen = "4.0.1"

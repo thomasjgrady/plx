@@ -1,69 +1,50 @@
-use crate::{ast::{Binop, Expression, Literal, Lvalue, Statement, Type}, context::{Context, Error as ContextError}, eval::{Eval, RuntimeError}};
+use std::{collections::HashSet, fmt};
+
+use crate::{ast::{Binop, Expression, Literal, Lvalue, Statement, Type}, context::{Context, Error as ContextError}, eval::{Error as EvalError, Eval, RuntimeError}};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum TypeError {
-    Mistmatched {
-        expected: Expression,
-        actual: Expression,
+pub enum TypeError<T> {
+    Mismatched {
+        expected: Option<T>,
+        actual: T,
         detail: Option<String>
     },
-    NotAFunction {
-        expr: Expression,
+    InvalidType {
+        got: T,
         detail: Option<String>
     },
-    NotAType {
-        expr: Expression,
-        detail: Option<String>
-    },
-    NotABoolean {
-        expr: Expression,
-        detail: Option<String>
-    },
-    BinaryOperator {
-        op: Binop,
-        lhs: Expression,
-        rhs: Expression,
-        detail: Option<String>
-    },
-    AnnotationRequired {
-        lvalue: Lvalue,
+    MissingType {
         detail: Option<String>
     }
 }
 
-pub trait IsType {
-    fn is_type(&self) -> bool;
-}
-
-impl IsType for Expression {
-    fn is_type(&self) -> bool {
+impl<T: fmt::Display> fmt::Display for TypeError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Type(_) => true,
-            Self::Abs { lvalue, body } =>
-                lvalue.annotation.as_ref().map_or(false, |x| x.is_type()) && body.is_type(),
-            _ => false
-        }
-    }
-}
-
-pub trait IsSubtype<T> {
-    fn is_subtype(&self, t: &T) -> bool;
-}
-
-impl IsSubtype<Expression> for Expression {
-    fn is_subtype(&self, t: &Expression) -> bool {
-        match (self, t) {
-            (Self::Type(x), Self::Type(y)) if x == y => true,
-            (Self::Type(_), Self::Type(Type::Type)) => true,
-            (
-                Self::Abs { lvalue: lv1, body: b1 },
-                Self::Abs { lvalue: lv2, body: b2 }
-            ) => {
-                let a1 = lv1.annotation.as_ref().unwrap();
-                let a2 = lv2.annotation.as_ref().unwrap();
-                a2.is_subtype(a1) && b1.is_subtype(b2)
-            },
-            _ => false
+            TypeError::Mismatched { expected, actual, detail } => {
+                write!(f, "Type mismatch: got {}", actual)?;
+                if let Some(exp) = expected {
+                    write!(f, ", expected {}", exp)?;
+                }
+                if let Some(det) = detail {
+                    write!(f, " ({})", det)?;
+                }
+                Ok(())
+            }
+            TypeError::InvalidType { got, detail } => {
+                write!(f, "Invalid type: {}", got)?;
+                if let Some(det) = detail {
+                    write!(f, " ({})", det)?;
+                }
+                Ok(())
+            }
+            TypeError::MissingType { detail } => {
+                write!(f, "Missing type")?;
+                if let Some(det) = detail {
+                    write!(f, " ({})", det)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -71,159 +52,210 @@ impl IsSubtype<Expression> for Expression {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error<E> {
     Context(ContextError),
-    Runtime(RuntimeError),
-    Type(E)
+    Type(E),
+    Runtime(RuntimeError)
 }
 
-pub trait TypeCheck<T, E> {
-    fn check(&self, ctx: &mut Context<T>, expected: &T) -> Result<(), Error<E>>;
+pub trait IsType {
+    fn is_type(&self) -> bool;
 }
 
-impl TypeCheck<Expression, TypeError> for Expression {
-    fn check(&self, ctx: &mut Context<Expression>, expected: &Expression) -> Result<(), Error<TypeError>> {
+pub trait IsSubtype {
+    fn is_subtype(&self, of: &Self) -> bool;
+}
+
+pub trait TypeCheck<C, T, E> {
+    fn check(&self, ctx: &mut Context<C>, expected: &T) -> Result<(), Error<E>>;
+}
+
+pub trait TypeInfer<C, T, E> {
+    fn infer(&self, ctx: &mut Context<C>) -> Result<T, Error<E>>;
+}
+
+impl IsType for Expression {
+    fn is_type(&self) -> bool {
+        match self {
+            Self::Type(_) => true,
+            Self::Abs { arg, body } => match &arg.annotation {
+                Some(x) => x.is_type() && body.is_type(),
+                None => false
+            },
+            _ => false
+        }
+    }
+}
+
+impl IsSubtype for Expression {
+    fn is_subtype(&self, of: &Self) -> bool {
+        match (self, of) {
+            (Self::Type(x), Self::Type(y)) if x == y => true,
+            (Self::Type(_), Self::Type(Type::Type)) => true,
+            (
+                Self::Abs { arg: lv1, body: b1 },
+                Self::Abs { arg: lv2, body: b2 }
+            ) => {
+                let (a1, a2) = match (&lv1.annotation, &lv2.annotation) {
+                    (Some(a1), Some(a2)) => (a1, a2),
+                    _ => return false
+                };
+                a2.is_subtype(a1) && b1.is_subtype(b2)
+            },
+            _ => false
+        }
+    }
+}
+
+impl TypeCheck<Self, Self, TypeError<Self>> for Expression {
+    fn check(&self, ctx: &mut Context<Self>, expected: &Self) -> Result<(), Error<TypeError<Self>>> {
         let t_self = self.infer(ctx)?;
         if !t_self.is_type() {
-            return Err(Error::Type(TypeError::NotAType { expr: t_self.clone(), detail: None }));
+            return Err(Error::Type(TypeError::InvalidType { got: t_self, detail: None }));
         }
         if !expected.is_type() {
-            return Err(Error::Type(TypeError::NotAType { expr: expected.clone(), detail: None }));
+            return Err(Error::Type(TypeError::InvalidType { got: expected.clone(), detail: None }));
         }
         if !t_self.is_subtype(expected) {
-            return Err(Error::Type(TypeError::Mistmatched { expected: expected.clone(), actual: t_self, detail: None }));
+            return Err(Error::Type(TypeError::Mismatched {
+                expected: Some(expected.clone()),
+                actual: t_self,
+                detail: None
+            }));
         }
         Ok(())
     }
 }
 
-pub trait TypeInfer<T, E, R = T> {
-    fn infer(&self, ctx: &mut Context<T>) -> Result<R, Error<E>>;
-}
-
-impl TypeInfer<Expression, TypeError> for Expression {
-
-    fn infer(&self, ctx: &mut Context<Expression>) -> Result<Expression, Error<TypeError>> {
+impl TypeInfer<Self, Self, TypeError<Self>> for Expression {
+    fn infer(&self, ctx: &mut Context<Self>) -> Result<Self, Error<TypeError<Self>>> {
         match self {
             Self::Literal(x) => match x {
                 Literal::Unit => Ok(Self::Type(Type::Unit)),
                 Literal::Bool(_) => Ok(Self::Type(Type::Bool)),
                 Literal::Int(_) => Ok(Self::Type(Type::Int))
             },
-            Self::Type(_) => Ok(Self::Type(Type::Type)),
+            Self::Type(_) => Ok(self.clone()),
             Self::Ident(x) => ctx.lookup(x)
                 .cloned()
                 .map_err(|e| Error::Context(e)),
             Self::Binop { op, lhs, rhs } => {
-                let t_lhs = lhs.infer(ctx)?;
-                match (op, &t_lhs) {
-                    (Binop::Add, Self::Type(Type::Int)) => {
-                        rhs.check(ctx, &t_lhs)?;
-                        Ok(t_lhs)
+                let x = lhs.infer(ctx)?;
+                let y = rhs.infer(ctx)?;
+                match op {
+                    Binop::Add | Binop::Mul => match (&x, &y) {
+                        (Self::Type(Type::Int), Self::Type(Type::Int)) => Ok(Self::Type(Type::Int)),
+                        (Self::Type(Type::Int), t) | (t, Self::Type(Type::Int)) | (t, _) =>
+                            Err(Error::Type(TypeError::Mismatched {
+                                expected: Some(Self::Type(Type::Int)),
+                                actual: t.clone(),
+                                detail: Some(format!("Invalid type for operator `{}`", op))
+                            }))
                     },
-                    (Binop::Eq, Self::Type(_)) => {
-                        rhs.check(ctx, &t_lhs)?;
-                        Ok(Self::Type(Type::Bool))
-                    },
-                    _ => {
-                        let t_rhs = rhs.infer(ctx)?;
-                        Err(Error::Type(TypeError::BinaryOperator { op: *op, lhs: t_lhs, rhs: t_rhs, detail: None }))
+                    Binop::Eq => match (&x, &y) {
+                        (Self::Literal(_), Self::Literal(_)) => Ok(Self::Type(Type::Bool)),
+                        (Self::Type(_), Self::Type(_)) => Ok(Self::Type(Type::Bool)),
+                        (Self::Literal(_), t) | (t, Self::Literal(_)) => Err(Error::Type(TypeError::Mismatched {
+                            expected: None,
+                            actual: t.clone(),
+                            detail: Some(format!("Invalid comparison in operator `{}`: expected literal", op))
+                        })),
+                        (Self::Type(_), t) | (t, Self::Type(_)) => Err(Error::Type(TypeError::Mismatched {
+                            expected: None,
+                            actual: t.clone(),
+                            detail: Some(format!("Invalid comparison in operator `{}`: expected type", op))
+                        })),
+                        _ => Err(Error::Type(TypeError::Mismatched {
+                            expected: None,
+                            actual: x.clone(),
+                            detail: Some(format!("Invalid type for operator `{}`", op))
+                        })),
                     }
                 }
             },
-            Self::IfThenElse { if_, then, else_ } => {
-                if_.check(ctx, &Expression::Type(Type::Bool))?;
-                let t_then = then.infer(ctx)?;
-                else_.check(ctx, &t_then)?;
-                Ok(t_then)
-            },
-            Self::Abs { lvalue, body } => {
-                let an = match &lvalue.annotation {
-                    Some(x) => {
-                        // evaluate the given expression (things are dependently typed)
-                        x.check(ctx, &Self::Type(Type::Type))?;
-                        x.eval(ctx)
-                            .map_err(|e| match e {
-                                crate::eval::Error::Context(c) => Error::Context(c),
-                                crate::eval::Error::Runtime(r) => Error::Runtime(r)
-                            })?
-                    },
-                    None => return Err(Error::Type(TypeError::AnnotationRequired {
-                        lvalue: lvalue.clone(),
-                        detail: Some("Function type parameters must be annotated".to_string())
+            Self::Abs { arg, body } => {
+                
+                let an = match &arg.annotation {
+                    Some(x) => x,
+                    None => return Err(Error::Type(TypeError::MissingType {
+                        detail: Some("Function type infernece is unimplemented".to_string())
                     }))
                 };
-                let shadowed = ctx.bind(lvalue.ident.clone(), an.clone());
-                let t_ret = body.infer(ctx)?;
+                an.check(ctx, &Self::Type(Type::Type))?;
+                let t_an = an.eval(ctx)
+                    .map_err(|e| match e {
+                        EvalError::Context(c) => Error::Context(c),
+                        EvalError::Runtime(r) => Error::Runtime(r)
+                    })?;
+                    
+                let body_subs = body.subs(
+                    &Self::Ident(arg.ident.clone()),
+                    &t_an
+                );
+                let existing = ctx.bindings.keys().cloned().collect::<HashSet<_>>();
+                let shadowed = ctx.remove(&arg.ident);
+                let t_ret = body_subs.infer(ctx)?;
                 if let Some(s) = shadowed {
-                    ctx.bind(lvalue.ident.clone(), s);
+                    ctx.bind(arg.ident.clone(), s);
                 }
+                ctx.bindings.retain(|k, _| existing.contains(k));
                 Ok(Self::Abs {
-                    lvalue: Lvalue::new(lvalue.ident.clone(), Some(an)),
+                    arg: Lvalue::new(arg.ident.clone(), Some(t_an)),
                     body: Box::new(t_ret)
                 })
             },
             Self::App { func, arg } => {
-                // TODO: remove this special case
-                if let Expression::Ident(s) = *func.clone() {
-                    if &s == "print" {
-                        return Ok(Expression::Type(Type::Unit));
-                    }
-                }
-
-                let (arg_type, ret_type) = match func.infer(ctx)? {
-                    Self::Abs { lvalue, body } => match lvalue.annotation {
-                        Some(x) => (x, body),
-                        _ => return Err(Error::Type(TypeError::AnnotationRequired {
-                            lvalue: lvalue.clone(),
-                            detail: Some("Function type parameters must be annotated".to_string())
-                        }))
-                    },
+                let f = func.infer(ctx)?;
+                let x = arg.infer(ctx)?;
+                let (arg, body) = match f {
+                    Self::Abs { arg, body } => (arg, body),
                     _ => {
-                        return Err(Error::Type(TypeError::NotAFunction {
-                            expr: *func.clone(),
-                            detail: None
-                        }))
+                        return Err(Error::Type(TypeError::Mismatched {
+                            expected: None,
+                            actual: f,
+                            detail: Some("Expected function".to_string())
+                        }));
                     }
                 };
-
-                arg.check(ctx, &arg_type)?;
-                Ok(*ret_type)
+                let an = match arg.annotation {
+                    Some(x) => x,
+                    None => {
+                        return Err(Error::Type(TypeError::MissingType { detail: Some("Function arguments must be annotated".to_string()) }));
+                    }
+                };
+                x.check(ctx, &an)?;
+                Ok(*body)
             }
         }
     }
 }
 
-impl TypeInfer<Expression, TypeError, Statement> for Statement {
-    fn infer(&self, ctx: &mut Context<Expression>) -> Result<Statement, Error<TypeError>> {
+impl TypeInfer<Expression, Self, TypeError<Expression>> for Statement {
+    fn infer(&self, ctx: &mut Context<Expression>) -> Result<Self, Error<TypeError<Expression>>> {
         match self {
-            Self::Assign { ident, annotation, expr } => {
-                // TODO: allow self reference in evaluation of annotation
-                let an = annotation.as_ref().map(|x| {
-                    x.check(ctx, &Expression::Type(Type::Type))?;
-                    x.eval(ctx).map_err(|e| match e {
-                        crate::eval::Error::Context(c) => Error::Context(c),
-                        crate::eval::Error::Runtime(r) => Error::Runtime(r)
-                    })
-                }).transpose()?;
+            Self::Assign { lv, expr } => {
 
-                // TODO: allow left and right typing of functions here. I.e. copy
-                // annotation to lvalue annotations or vice-versa to allow type
-                // checking of recursive functions
-                
+                // TODO: deal with forward declaration of functions properly
+                if let Some(x) = &lv.annotation {
+                    ctx.bind_unique(lv.ident.clone(), *x.clone())
+                        .map_err(|c| Error::Context(c))?;
+                }
+
                 let t_expr = expr.infer(ctx)?;
-                let t_an = match an {
-                    Some(x) => x,
+                let t_an = match &lv.annotation {
+                    Some(t_an) => {
+                        t_expr.check(ctx, t_an)?;
+                        *t_an.clone()
+                    },
                     None => t_expr.clone()
                 };
-                t_expr.check(ctx, &t_an)?;
-                ctx.bind_unique(ident.clone(), t_expr.clone())
-                    .map_err(|e| Error::Context(e))?;
-                Ok(Self::Assign {
-                    ident: ident.clone(),
-                    annotation: Some(t_an),
-                    expr: t_expr
-                })
+
+                ctx.bind(lv.ident.clone(), t_expr.clone());
+
+                Ok(Self::Assign { lv: Lvalue::new(lv.ident.clone(), Some(t_an)), expr: Box::new(t_expr) })
             },
-            Self::Expression(e) => Ok(Self::Expression(e.infer(ctx)?))
+            Self::Expr(expr) => {
+                expr.infer(ctx)?;
+                Ok(Self::Expr(Expression::Type(Type::Unit)))
+            }
         }
     }
 }

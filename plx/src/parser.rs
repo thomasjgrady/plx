@@ -31,25 +31,43 @@ pub fn parser<'a>() -> impl Parser<
         )
     ));
 
-    let arg = choice((
-        ident.clone().map(|x| Lvalue::new(x, None)),
+    let args = choice((
         ident.clone()
+            .repeated()
+            .at_least(1)
+            .collect::<Vec<_>>()
             .then(syntax(Syntax::Colon).ignore_then(expr.clone()))
             .delimited_by(
                 syntax(Syntax::Paren(Side::Left)),
                 syntax(Syntax::Paren(Side::Right))
             )
-            .map(|(ident, annotation): (String, Expression)| Lvalue::new(ident, Some(annotation.clone())))
+            .map(|(idents, annotation)| (idents, Some(annotation))),
+        ident.clone()
+            .repeated()
+            .at_least(1)
+            .collect::<Vec<_>>()
+            .map(|idents| (idents, None))
     ));
 
     let lvalue = ident.clone()
         .then((syntax(Syntax::Colon).ignore_then(expr.clone())).or_not())
         .map(|(ident, annotation)| Lvalue::new(ident, annotation));
 
-    let func = arg.clone()
+    let func = args.clone()
         .then_ignore(syntax(Syntax::Arrow))
         .then(expr.clone())
-        .map(|(lv, body)| Expression::Abs { arg: lv, body: Box::new(body) });
+        .map(|((mut idents, annotation), body)| {
+            let last = idents.pop().unwrap();
+            let f = Expression::Abs {
+                arg: Lvalue::new(last, annotation.clone()),
+                body: Box::new(body)
+            };
+            idents.reverse();
+            idents.into_iter().fold(f, |body, ident| Expression::Abs {
+                arg: Lvalue::new(ident, annotation.clone()),
+                body: Box::new(body)
+            })
+        });
 
     let ops = atom.pratt(vec![
         infix(left(3), empty(), |x, _, y, _| {

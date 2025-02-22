@@ -78,3 +78,23 @@ fn test_precedence_2() {
         &Expression::Literal(Literal::Bool(true))
     );
 }
+
+#[test]
+fn test_multi_argument_1() {
+    let src = r#"
+        let f = (x y z : int) -> x + y * z;
+        let res = f 1 2 3;
+    "#;
+    let lex = lexer();
+    let tokens = lex.parse(&src).unwrap();
+    let parse = parser();
+    let ast = parse.parse(&tokens).unwrap();
+    let mut ctx = Context::new();
+    for s in &ast {
+        s.eval(&mut ctx).unwrap();
+    }
+    assert_eq!(
+        ctx.lookup(&"res".to_string()).unwrap(),
+        &Expression::Literal(Literal::Int(7))
+    );
+}

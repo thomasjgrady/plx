@@ -1,4 +1,4 @@
-use crate::ast::{Binop, Expression, Lvalue};
+use crate::ast::{Binop, Expression, Lvalue, Pattern};
 use crate::lexer::{Keyword, Side, Syntax};
 use crate::{ast::Statement, lexer::Token};
 use chumsky::prelude::*;
@@ -31,6 +31,7 @@ pub fn parser<'a>() -> impl Parser<
         )
     ));
 
+    // allows (x0 x1 ... xn : type)
     let args = choice((
         ident.clone()
             .repeated()
@@ -69,6 +70,36 @@ pub fn parser<'a>() -> impl Parser<
             })
         });
 
+    // TODO: make "_" a special token
+    let pattern = choice((
+        literal.clone()
+            .map(|x| Pattern::Literal(x)),
+        ident.clone()
+            .filter(|x| x == "_")
+            .map(|_| Pattern::Any)
+    ));
+
+    let match_case = pattern.clone()
+        .then_ignore(syntax(Syntax::Arrow))
+        .then(expr.clone());
+
+    let r#match = keyword(Keyword::Match)
+        .ignore_then(expr.clone())
+        .then(
+            match_case.clone()
+                .separated_by(syntax(Syntax::Comma))
+                .at_least(1)
+                .collect::<Vec<_>>()
+                .delimited_by(
+                    syntax(Syntax::Brace(Side::Left)),
+                    syntax(Syntax::Brace(Side::Right))
+                )
+        )
+        .map(|(expr, cases)| Expression::Match {
+            expr: Box::new(expr),
+            cases
+        });
+
     let ops = atom.pratt(vec![
         infix(left(3), empty(), |x, _, y, _| {
             Expression::App { func: Box::new(x), arg: Box::new(y) }
@@ -86,6 +117,7 @@ pub fn parser<'a>() -> impl Parser<
 
     expr.define(choice((
         func,
+        r#match,
         ops
     )));
 

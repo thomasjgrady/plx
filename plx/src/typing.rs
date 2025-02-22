@@ -223,6 +223,21 @@ impl TypeInfer<Self, Self, TypeError<Self>> for Expression {
                 };
                 x.check(ctx, &an)?;
                 Ok(*body)
+            },
+            Self::Match { expr, cases } => {
+                let _ = expr.infer(ctx)?;
+                // TODO: exhaustiveness check
+                // TODO: type check vs input
+                // TODO: destructuring
+                if cases.len() == 0 {
+                    return Ok(Expression::Type(Type::Unit)); // correct?
+                }
+                let (_, e0) = cases.get(0).unwrap();
+                let t = e0.infer(ctx)?;
+                for (_, e) in &cases[1..] {
+                    e.check(ctx, &t)?;
+                }
+                Ok(t)
             }
         }
     }

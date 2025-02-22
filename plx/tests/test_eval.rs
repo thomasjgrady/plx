@@ -98,3 +98,26 @@ fn test_multi_argument_1() {
         &Expression::Literal(Literal::Int(7))
     );
 }
+
+#[test]
+fn test_match_1() {
+    let src = r#"
+        let x = 3;
+        let y = match x {
+            3 -> true,
+            _ -> false
+        };
+    "#;
+    let lex = lexer();
+    let tokens = lex.parse(&src).unwrap();
+    let parse = parser();
+    let ast = parse.parse(&tokens).unwrap();
+    let mut ctx = Context::new();
+    for s in &ast {
+        s.eval(&mut ctx).unwrap();
+    }
+    assert_eq!(
+        ctx.lookup(&"y".to_string()).unwrap(),
+        &Expression::Literal(Literal::Bool(true))
+    );
+}

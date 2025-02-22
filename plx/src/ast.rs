@@ -35,6 +35,31 @@ impl Lvalue {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
+pub enum Pattern {
+    Literal(Literal),
+    Any
+}
+
+impl Pattern {
+    pub fn matches(&self, expr: &Expression) -> bool {
+        match (self, expr) {
+            (Self::Any, _) => true,
+            (Self::Literal(x), Expression::Literal(y)) => x == y,
+            (Self::Literal(_), _) => false
+        }
+    }
+}
+
+impl Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Literal(x) => write!(f, "{}", x),
+            Self::Any => write!(f, "_")
+        }
+    }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Expression {
     Literal(Literal),
     Type(Type),
@@ -51,6 +76,10 @@ pub enum Expression {
     App {
         func: Box<Self>,
         arg: Box<Self>
+    },
+    Match {
+        expr: Box<Self>,
+        cases: Vec<(Pattern, Self)>
     }
 }
 
@@ -103,6 +132,12 @@ impl Expression {
             Self::App { func, arg } => Self::App {
                 func: Box::new(func.subs(replace, with)),
                 arg: Box::new(arg.subs(replace, with))
+            },
+            Self::Match { expr, cases } => Self::Match {
+                expr: Box::new(expr.subs(replace, with)),
+                cases: cases.iter()
+                    .map(|(p, x)| (p.clone(), x.subs(replace, with)))
+                    .collect::<Vec<_>>()
             }
         }
     }
@@ -167,7 +202,19 @@ impl Display for Expression {
                     None => write!(f, "{} -> {}", arg, body),
                 }
             },
-            Self::App { func, arg } => write!(f, "{} ({})", func, arg)
+            Self::App { func, arg } => write!(f, "{} ({})", func, arg),
+            Self::Match { expr, cases } => {
+                write!(f, "match {} {{\n", expr)?;
+                for i in 0..cases.len() {
+                    let (p, x) = cases.get(i).unwrap();
+                    write!(f, "  {} -> {}", p, x)?;
+                    if i < cases.len()-1 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "\n")?;
+                }
+                write!(f, "}}")
+            }
         }
     }
 }

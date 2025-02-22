@@ -14,7 +14,8 @@ pub trait Eval<C, T, E> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeError {
-    Type(TypeError<Expression>)
+    Type(TypeError<Expression>),
+    NoMatch(Expression)
 }
 
 impl Eval<Self, Self, RuntimeError> for Expression {
@@ -75,6 +76,15 @@ impl Eval<Self, Self, RuntimeError> for Expression {
                 }
                 ctx.bindings.retain(|k, _| existing.contains(k));
                 Ok(res)
+            },
+            Self::Match { expr, cases } => {
+                let x = expr.eval(ctx)?;
+                for (p, e) in cases {
+                    if p.matches(&x) {
+                        return e.eval(ctx);
+                    }
+                }
+                Err(Error::Runtime(RuntimeError::NoMatch(*expr.clone())))
             }
         }
     }

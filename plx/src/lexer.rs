@@ -3,7 +3,8 @@ use chumsky::prelude::*;
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Keyword {
-    Let
+    Let,
+    Match
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -18,7 +19,9 @@ pub enum Syntax {
     Colon,
     Semicolon,
     Arrow,
-    Paren(Side)
+    Comma,
+    Paren(Side),
+    Brace(Side)
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
@@ -55,13 +58,18 @@ pub fn lexer<'src>() -> impl Parser<
         just("==").to(Token::Binop(Binop::Eq)),
 
         just("let").to(Token::Keyword(Keyword::Let)),
+        just("match").to(Token::Keyword(Keyword::Match)),
 
         just("=").to(Token::Syntax(Syntax::Equals)),
         just(":").to(Token::Syntax(Syntax::Colon)),
         just(";").to(Token::Syntax(Syntax::Semicolon)),
         just("->").to(Token::Syntax(Syntax::Arrow)),
+        just(",").to(Token::Syntax(Syntax::Comma)),
+
         just("(").to(Token::Syntax(Syntax::Paren(Side::Left))),
         just(")").to(Token::Syntax(Syntax::Paren(Side::Right))),
+        just("{").to(Token::Syntax(Syntax::Brace(Side::Left))),
+        just("}").to(Token::Syntax(Syntax::Brace(Side::Right))),
 
         text::ident().map(|x: &str| Token::Ident(x.to_string()))
     ))
